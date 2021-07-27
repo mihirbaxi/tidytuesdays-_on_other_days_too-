@@ -16,8 +16,6 @@ p_load(
 tt <- tidytuesdayR::tt_load('2021-07-20')
 drought <- tt$drought
 
-# drought <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-07-20/drought.csv')
-
 states <- readr::read_csv("https://raw.githubusercontent.com/jasonong/List-of-US-States/master/states.csv") %>% 
   tibble::add_row(State = "Puerto Rico", Abbreviation = "PR") %>% 
   rename(state_abb = Abbreviation,
@@ -27,20 +25,16 @@ states <- readr::read_csv("https://raw.githubusercontent.com/jasonong/List-of-US
 
 # Initial cleaning --------------------------------------------------------
 
-drought_clean <- drought %>% 
+drought_severity_weekly <- drought %>% 
   mutate(
-    date = ymd(valid_end),
-    week = week(valid_end),
-    month = month(valid_end),
-    year = year(valid_end)
+    date = ymd(valid_start),
+    week = week(valid_start),
+    month = month(valid_start),
+    year = year(valid_start)
     #impact_percap = pop_total/area_total
   ) %>%
   left_join(states, by = c("state_abb")) %>% 
-  select(-valid_start, -valid_end, -stat_fmt, -map_date)
-
-# Severity calculations and chart  ----------------------------------------------------------------
-
-drought_severity_weekly <- drought_clean %>%
+  select(-valid_start, -valid_end, -stat_fmt, -map_date) %>%
   mutate(
     severity_measure = recode(drought_lvl, "None" = 0, "D0" = 1, "D1" = 2, "D2" = 3, "D3" = 4, "D4" = 5),
     severity_area = severity_measure * (area_pct/100),
@@ -51,13 +45,20 @@ drought_severity_weekly <- drought_clean %>%
             week_severity_pop = sum(severity_pop))
 # Severity calculation motivated by: https://github.com/efranke22/tidytuesday/blob/main/july2021/tidytuesday_week30.Rmd
 
+
+
+# Severity across years ---------------------------------------------------
+
+
 ggplot(drought_severity_weekly %>%
          filter(
            state != "Puerto Rico"
          )) +
   geom_bar(
     aes(x = date, y = week_severity_area),
-    stat = "identity"
+    stat = "identity",
+    colour = "#453426",
+    fill = "#453426"
   ) +
   facet_geo(~ state) +
   labs(
@@ -66,60 +67,92 @@ ggplot(drought_severity_weekly %>%
   ylab("Severity = Classification * % of area impacted") +
   theme(
     axis.title.x = element_blank(),
+    axis.text.x = element_text(angle = 90),
+    panel.background = element_blank(),
+    panel.grid.major.y = element_line(colour = "lightgrey")
   ) 
 
-count <- drought_severity_weekly %>% group_by(state, year = year(date)) %>% summarise(area = mean(week_severity_area), pop = mean(week_severity_pop)) 
-count_drop <- count %>% 
-  group_by(state) %>% summarise(area = sum(area), pop = sum(pop)) %>% 
-  filter(area > 25)
 
-ggplot(count_drop) + 
-  geom_col(aes(x = state, y = area))
+# Severity in 2021 --------------------------------------------------------------------
+
+drought_severity_weekly_2021 <- drought_severity_weekly %>% 
+  filter(year(date) %in% c("2021"))
 
 
-drought_clean_severe <- drought_clean %>% 
-  filter(state %in% count_drop$state,
-         drought_lvl %in% c("D2", "D3", "D4"))
-
-state_map <- map_data("state")
-
-ggplot(drought_severity_weekly) +
-  geom_map(map = state_map,
-           aes(map_id = state, group = date, fill = week_severity_area)) +
-  expand_limits(x = state_map$long, y = state_map$lat) 
-
-
-# Occurances --------------------------------------------------------------
-
-drought_occurance <- drought_clean %>%
-  filter(area_pct != c(0, 0.00)) %>% 
-  group_by(year, month, state, drought_lvl) %>%
-  count()
-
-ggplot(drought_occurance %>% filter(drought_lvl != c("None"))) +
+ggplot(drought_severity_weekly_2021 %>%
+         filter(
+           state != "Puerto Rico"
+         )) +
   geom_bar(
-    aes(
-      x = year,
-      y = n,
-      fill = drought_lvl
-    ),
-    stat = "identity"
+    aes(x = date, y = week_severity_area),
+    stat = "identity",
+    colour = "#b19179",
+    fill = "#b19179"
   ) +
-  facet_geo(~ state)
-# 
-# drought_occurance_overall <- drought_clean %>%
-#   filter(area_pct != c(0, 0.00)) %>% 
-#   group_by(year, month, drought_lvl) %>%
-#   count()
+  facet_geo(~state) +
+  labs(
+    title = "Severity of droughts in US states (2021)"
+  ) +
+  ylab("Severity = Classification * % of area impacted") +
+  theme(
+    axis.title.x = element_blank(),
+    panel.background = element_blank(),
+    panel.grid.major.y = element_line(colour = "lightgrey")
+  ) 
 
-ggplot(drought_occurance) +
-  geom_bar(
-    aes(
-      x = year,
-      y = n,
-      fill = drought_lvl,
-      colour = drought_lvl
-    ),
-    stat = "identity"
+
+
+# The most severe ---------------------------------------------------------
+
+drought_clean_severe <- drought %>% 
+  mutate(
+    date = ymd(valid_start),
+    week = week(valid_start),
+    month = month(valid_start),
+    year = year(valid_start)
+    #impact_percap = pop_total/area_total
+  ) %>%
+  left_join(states, by = c("state_abb")) %>% 
+  select(-valid_start, -valid_end, -stat_fmt, -map_date) %>% 
+  filter(drought_lvl %in% c("D3")) %>% 
+  group_by(state, year, month) %>% 
+  summarise(
+    date = first(date),
+    area_pct = mean(area_pct),
+    pop_pct = mean(pop_pct)
   )
+
+ggplot(drought_clean_severe  %>%
+         filter(
+           state != c("Puerto Rico"),
+           year != 2001
+         )) +
+  geom_line(
+    aes(x = month, y = area_pct, colour = factor(year))
+  ) +
+  facet_geo(~state) +
+  theme(
+    axis.title.x = element_blank(),
+    panel.background = element_blank(),
+    panel.grid.major.y = element_line(colour = "lightgrey")
+  ) 
+
+
+ggplot(drought_clean_severe %>%
+         filter(
+           state %in% c("Washington", "Oregon", "California",
+                        "Idaho", "Nevada", "Utah", "Arizona",
+                        "Montana", "Wyoming", "Colorado", "New Mexico"),
+           year > 2010
+         )) +
+  geom_line(
+    aes(x = month, y = area_pct, colour = factor(year))
+  ) +
+  facet_wrap(~state) +
+  scale_x_continuous(breaks = c(1, 3, 5, 7, 9, 12)) +
+  theme(
+    axis.title.x = element_blank(),
+    panel.background = element_blank(),
+    panel.grid.major.y = element_line(colour = "lightgrey")
+  ) 
 
